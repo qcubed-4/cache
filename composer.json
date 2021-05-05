@@ -3,7 +3,7 @@
   "description": "Standalone cache library, used by the QCubed-4 framework, but can also be used independently. Implements the PSR-16 SimpleCache interface",
   "keywords": ["php", "SimpleCache", "Psr-16"],
   "homepage": "https://qcubed.eu/",
-  "type": "qcubed-library",
+  "type": "library",
   "license": "MIT",
   "support": {
       "issues": "https://github.com/qcubed-4/application/issues",
