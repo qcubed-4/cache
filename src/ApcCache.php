@@ -10,11 +10,16 @@
 namespace QCubed\Cache;
 
 use Psr\SimpleCache\CacheInterface;
+use QCubed\Cache\Exception\InvalidArgument;
+use Exception;
+use DateInterval;
+use DateTimeImmutable;
+use Traversable;
 
 /**
  * Class ApcCache
  *
- * Cached based on APC or APCu interface, which are not included in PHP but easily added with a PECL install. Note that
+ * Cached based on APC or APCu interface, which are not included in PHP but easily added with a PECL installation. Note that
  * the functions to use have changed, and even if you are using APCu, you might be using a version that requires the APC
  * functions. This will try to use the correct one.
  *
@@ -23,26 +28,25 @@ use Psr\SimpleCache\CacheInterface;
 class ApcCache extends CacheBase implements CacheInterface
 {
     /** @var int */
-    protected $ttl = 86400; // default ttl, one day between cache drops
+    protected int $ttl = 86400; // default ttl, one day between cache drops
     /** @var bool  */
-    protected $blnUseApcu;
+    protected bool $blnUseApcu;
 
     /**
      * ApcCache constructor.
-     * @param null | array $objOptionsArray Configuration options.
+     * @param array | null $objOptionsArray Configuration options.
      *                      Accepts the one option 'ttl' to set the default ttl value in seconds.
-     * @throws \Exception
+     * @throws Exception
      */
-    public function __construct($objOptionsArray = null)
+    public function __construct(array $objOptionsArray = null)
     {
         if (function_exists('apcu_fetch')) {
             $this->blnUseApcu = true;
         }
         elseif (function_exists('apc_fetch')) {
             $this->blnUseApcu = false;
-        }
-        else {
-            throw new \Exception('Neither Apc nor Apcu is installed.');
+        } else {
+            throw new Exception('Neither Apc nor Apcu is installed.');
         }
 
         if (isset($objOptionsArray['ttl'])) {
@@ -50,15 +54,14 @@ class ApcCache extends CacheBase implements CacheInterface
         }
     }
 
-
     /**
-     * Get the object that has the given key from the cache
+     * Retrieves a value from the cache using the provided key. If the key does not exist, the default value is returned.
      *
-     * @param string $strKey the key of the object in the cache
-     * @param null|mixed $default
-     * @return null|mixed
+     * @param string $strKey The key used to fetch the value from the cache.
+     * @param mixed|null $default The default value to return if the key does not exist in the cache.
+     * @return mixed The value from the cache if the key exists, otherwise the default value.
      */
-    public function get($strKey, $default = null)
+    public function get(string $strKey, mixed $default = null): mixed
     {
         if ($this->blnUseApcu) {
             $value = apcu_fetch($strKey, $success);
@@ -68,37 +71,34 @@ class ApcCache extends CacheBase implements CacheInterface
         }
         if ($success) {
             return $value;
-        }
-        else {
+        } else {
             return $default;
         }
     }
 
     /**
-     * Set the object into the cache with the given key
+     * Stores a value in the cache with a specified key and optional time-to-live (TTL) duration.
      *
-     * @param string $strKey The key to use for the object
-     * @param mixed $objValue The object to put in the cache. Can be any serializable object or value.
-     * @param int|null|\DateInterval $ttl Number of seconds after which the key has to expire. Zero value means persist
-     *                         indefinitely. Negative value means expire immediately.
-     *
-     * @return bool true on success
-     * @throws Exception\InvalidArgument
+     * @param string $strKey The key used to store the value in the cache. Must not contain invalid characters ('{}()/\@:').
+     * @param mixed $objValue The value to be stored in the cache.
+     * @param DateInterval|int|null $ttl The time-to-live for the cached value. Can be specified as seconds, a DateInterval, or null to use the default TTL.
+     * @return bool True if the value was successfully stored in the cache, false otherwise.
+     * @throws InvalidArgument If the key contains invalid characters.
      */
-    public function set($strKey, $objValue, $ttl = null)
+    public function set(string $strKey, mixed $objValue, DateInterval|int $ttl = null): bool
     {
         // PSR-16 is for some reason picky about what characters you can have in the key, thinking it will "some day" use certain characters to mean other things.
         $search = strpbrk($strKey, '{}()/\@:');
         if ($search !== false) {
-            throw new Exception\InvalidArgument('Invalid character found in the key: ' . $search[0]);
+            throw new InvalidArgument('Invalid character found in the key: ' . $search[0]);
         }
 
         if ($ttl === null) {
             $ttl = $this->ttl;
         }
-        elseif ($ttl instanceof \DateInterval) {
+        elseif ($ttl instanceof DateInterval) {
             // convert DateInterval to total seconds
-            $reference = new \DateTimeImmutable;
+            $reference = new DateTimeImmutable;
             $endTime = $reference->add($ttl);
             $ttl = $endTime->getTimestamp() - $reference->getTimestamp();
         }
@@ -113,64 +113,64 @@ class ApcCache extends CacheBase implements CacheInterface
     }
 
     /**
-     * Delete the object that has the given key from the cache
-     * @param string $strKey the key of the object in the cache
-     * @return void
+     * Deletes a value from the cache using the provided key.
+     *
+     * @param string $strKey The key identifying the value to be deleted from the cache.
+     * @return bool
      */
-    public function delete($strKey)
+    public function delete(string $strKey): bool
     {
-       if ($this->blnUseApcu) {
-           apcu_delete($strKey);
-       }
-       else {
-           apc_delete($strKey);
-       }
+        if ($this->blnUseApcu) {
+            return apcu_delete($strKey) !== false;
+        } else {
+            return apc_delete($strKey) !== false;
+        }
     }
 
     /**
-     * Invalidate all the objects in the cache
+     * Deletes all items from the cache.
+     *
      * @return void
      */
-    public function deleteAll()
+    public function deleteAll(): void
     {
         $this->clear();
     }
 
     /**
-     * Clear the cache
+     * Clears the user cache, removing all stored entries.
      *
-     * return @void
+     * @return bool
      */
-    public function clear()
+    public function clear(): bool
     {
         if ($this->blnUseApcu) {
-            apcu_clear_cache();
-        }
-        else {
-            apc_clear_cache('user');
+            return apcu_clear_cache();
+        } else {
+            return apc_clear_cache('user');
         }
     }
 
     /**
-     * Returns an array of values if given an array of keys to search.
+     * Retrieves multiple values from the cache using the provided keys. Keys that do not exist in the cache will have the default value assigned.
      *
-     * @param iterable $keys
-     * @param mixed $default
-     * @return iterable
-     * @throws Exception\InvalidArgument
+     * @param array|Traversable $keys A list of keys to fetch values for from the cache.
+     * @param mixed|null $default The default value to assign to keys that do not exist in the cache.
+     * @return array An associative array of key-value pairs fetched from the cache. Keys not found in the cache will be paired with the default value.
+     * @throws InvalidArgument If the provided keys are neither an array nor an instance of Traversable.
      */
-    public function getMultiple($keys, $default = null)
+    public function getMultiple(iterable $keys, mixed $default = null): iterable
     {
-        if (!is_array($keys) && !$keys instanceof \Traversable) {
-            throw new Exception\InvalidArgument();
+        if (!is_array($keys) && !$keys instanceof Traversable) {
+            throw new InvalidArgument();
         }
 
         if ($this->blnUseApcu) {
             $values = apcu_fetch($keys);
-        }
-        else {
+        } else {
             $values = apc_fetch($keys);
         }
+
         if ($values !== false) {
             foreach ($keys as $key) {
                 if (!isset($values[$key])) {
@@ -178,26 +178,25 @@ class ApcCache extends CacheBase implements CacheInterface
                 }
             }
             return $values;
-        }
-        else {
+        } else {
             return []; // some way of showing an error
         }
     }
 
     /**
-     * @param iterable $values Collection of key=>value pairs
-     * @param int|null|\DateInterval $ttl Number of seconds after which the key has to expire. Zero value means persist
-     *                         indefinitely. Negative value means expire immediately.
-     * @return bool
-     * @throws \Exception
+     * Stores multiple key-value pairs in the cache with an optional time-to-live (TTL) value.
+     *
+     * @param array $values An associative array of key-value pairs to be stored in the cache.
+     * @param DateInterval|int|null $ttl The time-to-live for the cached items. This can be an integer (in seconds), a DateInterval object, or null to use the default TTL.
+     * @return bool True if the operation was successful, otherwise False.
      */
-    public function setMultiple($values, $ttl = null){
+    public function setMultiple(iterable $values, null|DateInterval|int $ttl = null): bool
+    {
         if ($ttl === null) {
             $ttl = $this->ttl;
-        }
-        elseif ($ttl instanceof \DateInterval) {
+        } elseif ($ttl instanceof DateInterval) {
             // convert DateInterval to total seconds
-            $reference = new \DateTimeImmutable;
+            $reference = new DateTimeImmutable;
             $endTime = $reference->add($ttl);
             $ttl = $endTime->getTimestamp() - $reference->getTimestamp();
         }
@@ -212,22 +211,22 @@ class ApcCache extends CacheBase implements CacheInterface
     }
 
     /**
-     * Deletes multiple keys at once.
+     * Deletes multiple keys from the cache.
      *
-     * @param iterable $keys
-     * @return void
-     * @throws Exception\InvalidArgument
+     * @param iterable $keys The keys of the items to delete. Must be an iterable, such as an array or Traversable object.
+     * @return bool True if the operation is successful for all keys, otherwise false.
+     * @throws InvalidArgument
      */
-    public function deleteMultiple($keys) {
-        if (!is_array($keys) && !$keys instanceof \Traversable) {
-            throw new Exception\InvalidArgument();
+    public function deleteMultiple(iterable $keys): bool {
+
+        if (!is_array($keys) && !$keys instanceof Traversable) {
+            throw new InvalidArgument();
         }
 
         if ($this->blnUseApcu) {
-            apcu_delete($keys);
-        }
-        else {
-            apc_delete($keys);
+            return apcu_delete($keys) !== false;
+        } else {
+            return apc_delete($keys) !== false;
         }
     }
 
@@ -239,11 +238,10 @@ class ApcCache extends CacheBase implements CacheInterface
      * @param string $key
      * @return bool
      */
-    public function has($key) {
+    public function has(string $key): bool {
         if ($this->blnUseApcu) {
             return apcu_exists($key);
-        }
-        else {
+        } else {
             return apc_exists($key);
         }
     }

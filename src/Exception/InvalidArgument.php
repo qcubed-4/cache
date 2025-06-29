@@ -9,6 +9,9 @@
 
 namespace QCubed\Cache\Exception;
 
-class InvalidArgument extends \Exception implements \Psr\SimpleCache\InvalidArgumentException {
+use Exception;
+use Psr\SimpleCache\InvalidArgumentException;
+
+class InvalidArgument extends Exception implements InvalidArgumentException {
 
 }

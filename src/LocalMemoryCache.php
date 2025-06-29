@@ -10,46 +10,53 @@
 namespace QCubed\Cache;
 
 use Psr\SimpleCache\CacheInterface;
+use QCubed\Cache\Exception\InvalidArgument;
+use QCubed\Exception\Caller;
+use QCubed\Exception\InvalidCast;
+use DateInterval;
+use QCubed\Type;
 
 /**
- * Cache provider that uses a local in memory array.
- * The lifespan of this cache is the request, unless 'KeepInSession' option is used, in which case the lifespan
+ * Cache provider that uses a local in a memory array.
+ * The lifespan of this cache is the request, unless the 'KeepInSession' option is used, in which case the lifespan
  * is the session.
  */
 
 class LocalMemoryCache extends CacheBase implements CacheInterface
 {
     /** @var array */
-    protected $arrLocalCache;
+    protected array $arrLocalCache;
 
     /**
      * @param array $objOptionsArray configuration options for this cache provider. Currently supported options are
-     *   'KeepInSession': if set to true the cache will be kept in session
+     *   'KeepInSession': if set to true, the cache will be kept in session
      */
-    public function __construct($objOptionsArray)
+    public function __construct(array $objOptionsArray)
     {
         if (array_key_exists('KeepInSession', $objOptionsArray) && $objOptionsArray['KeepInSession'] === true) {
-            if (!isset($_SESSION['__LOCAL_MEMORY_CACHE__'])) {
-                $_SESSION['__LOCAL_MEMORY_CACHE__'] = array();
+            if (!isset($_SESSION['LOCAL_MEMORY_CACHE'])) {
+                $_SESSION['LOCAL_MEMORY_CACHE'] = array();
             }
-            $this->arrLocalCache = &$_SESSION['__LOCAL_MEMORY_CACHE__'];
+            $this->arrLocalCache = &$_SESSION['LOCAL_MEMORY_CACHE'];
         } else {
             $this->arrLocalCache = array();
         }
     }
 
     /**
-     * Get the object that has the given key from the cache
-     * @param string $strKey the key of the object in the cache
-     * @param null|mixed $default
-     * @return null|mixed
+     * Retrieves a value from the local cache associated with the specified key.
+     * If the key does not exist or the cached value has expired, the default value is returned.
+     *
+     * @param string $strKey The key associated with the cached value.
+     * @param mixed|null $default The default value to return if the key does not exist or the value has expired.
+     * @return mixed Returns the cached value if it exists and is not expired, otherwise returns the default value.
      */
-    public function get($strKey, $default = null)
+    public function get(string $strKey, mixed $default = null): mixed
     {
         if (array_key_exists($strKey, $this->arrLocalCache)) {
             // Note the clone statement - it is important to return a copy,
             // not a pointer to the stored object
-            // to prevent it's modification by user code.
+            // to prevent its modification by user code.
             $objToReturn = $this->arrLocalCache[$strKey];
             if ($objToReturn['timeToExpire'] != 0) {
                 // Time to expire was set. See if it should be expired
@@ -65,76 +72,86 @@ class LocalMemoryCache extends CacheBase implements CacheInterface
 
             return $objToReturn['value'];
         }
+
         return $default;
     }
 
     /**
-     * Set the object into the cache with the given key
+     * Stores a value in the local cache with the specified key and optional expiration time.
      *
-     * @param string $strKey                    the key to use for the object
-     * @param object $objValue                  the object to put in the cache
-     * @param int    $intExpirationAfterSeconds Number of seconds after which the key has to expire
-     *
-     * @return bool true on success
+     * @param string $strKey The key to associate with the value in the cache.
+     * @param mixed $objValue The value to be stored in the cache.
+     * @param int|DateInterval|null $intExpirationAfterSeconds The number of seconds after which the cached value will expire. Pass null for no expiration.
+     * @return bool Returns true if the value was successfully stored in the cache.
+     * @throws Caller
+     * @throws InvalidCast
      */
-    public function set($strKey, $objValue, $intExpirationAfterSeconds = null)
+    public function set(string $strKey, mixed $objValue, int|DateInterval|null $intExpirationAfterSeconds = null): bool
     {
         // Note the clone statement - it is important to store a copy,
         // not a pointer to the user object
-        // to prevent it's modification by user code.
+        // to prevent its modification by user code.
         $objToSet = $objValue;
         if ($objToSet && is_object($objToSet)) {
             $objToSet = clone $objToSet;
         }
         $this->arrLocalCache[$strKey] = array(
-            'timeToExpire' => $intExpirationAfterSeconds ? (time() + QType::cast($intExpirationAfterSeconds, QType::Integer)) : 0,
+            'timeToExpire' => $intExpirationAfterSeconds ? (time() + Type::cast($intExpirationAfterSeconds, Type::INTEGER)) : 0,
             'value' => $objToSet
         );
+
         return true;
     }
 
     /**
-     * Delete the object that has the given key from the cache
-     * @param string $strKey the key of the object in the cache
-     * @return void
+     * Deletes a value from the local cache associated with the specified key.
+     * If the key does not exist, no action is taken.
+     *
+     * @param string $strKey The key associated with the cached value to be deleted.
+     * @return bool
      */
-    public function delete($strKey)
+    public function delete(string $strKey): bool
     {
         if (array_key_exists($strKey, $this->arrLocalCache)) {
             unset($this->arrLocalCache[$strKey]);
         }
+
+        return true;
     }
 
     /**
-     * Alias for the clear method
-     * @return void
+     * Deletes all entries from the local cache by clearing it completely.
+     *
+     * @return void Does not return any value.
      */
-    public function deleteAll()
+    public function deleteAll(): void
     {
         $this->clear();
     }
 
     /**
-     * Invalidate all objects in the cache
-     * @return bool|void
+     * Clears all entries from the local cache.
+     *
+     * @return bool Removes all cached values, resetting the cache to an empty state.
      */
-    public function clear(){
+    public function clear(): bool
+    {
         $this->arrLocalCache = array();
+        return true;
     }
 
     /**
-     * Obtains multiple cache items by their unique keys.
+     * Retrieves multiple values from the local cache for the given keys.
+     * If a key does not exist or the associated value has expired, the default value is returned for that key.
      *
-     * @param iterable $keys    A list of keys that can obtained in a single operation.
-     * @param mixed    $default Default value to return for keys that do not exist.
-     *
-     * @return iterable A list of key => value pairs. Cache keys that do not exist or are stale will have $default as value.
-     *
-     * @throws \Psr\SimpleCache\InvalidArgumentException
-     *   MUST be thrown if $keys is neither an array nor a Traversable,
-     *   or if any of the $keys are not a legal value.
+     * @param array|iterable $keys The keys to retrieve values for.
+     * @param mixed|null $default The default value to return for keys that do not exist or have expired.
+     * @return array Returns an associative array where each key corresponds to the provided keys
+     *               and each value is the cached value or the default value.
+     * @throws Exception\InvalidArgument If the provided keys are not iterable.
      */
-    public function getMultiple($keys, $default = null) {
+    public function getMultiple(iterable $keys, mixed $default = null): iterable
+    {
         if (!is_array($keys) && !is_iterable($keys)) {
             throw new Exception\InvalidArgument ('Cannot iterate over keys');
         }
@@ -148,20 +165,17 @@ class LocalMemoryCache extends CacheBase implements CacheInterface
     }
 
     /**
-     * Persists a set of key => value pairs in the cache, with an optional TTL.
+     * Sets multiple key-value pairs in the cache with an optional time-to-live.
      *
-     * @param iterable               $values A list of key => value pairs for a multiple-set operation.
-     * @param null|int|\DateInterval $ttl    Optional. The TTL value of this item. If no value is sent and
-     *                                       the driver supports TTL then the library may set a default value
-     *                                       for it or let the driver take care of that.
-     *
-     * @return bool True on success and false on failure.
-     *
-     * @throws \Psr\SimpleCache\InvalidArgumentException
-     *   MUST be thrown if $values is neither an array nor a Traversable,
-     *   or if any of the $values are not a legal value.
+     * @param array|iterable $values An array or iterable of key-value pairs to set in the cache.
+     * @param DateInterval|int|null $ttl Optional. The time-to-live in seconds for the cached items. If null, the default TTL is used.
+     * @return bool Returns true on success.
+     * @throws Caller
+     * @throws InvalidArgument If the provided $values is not an array or iterable.
+     * @throws InvalidCast
      */
-    public function setMultiple($values, $ttl = null){
+    public function setMultiple(iterable $values, null|DateInterval|int $ttl = null): bool
+    {
         if (!is_array($values) && !is_iterable($values)) {
             throw new Exception\InvalidArgument ('Cannot iterate over values');
         }
@@ -169,21 +183,18 @@ class LocalMemoryCache extends CacheBase implements CacheInterface
         foreach ($values as $key=>$value) {
             $this->set($key, $value, $ttl);
         }
+
         return true;
     }
 
     /**
-     * Deletes multiple cache items in a single operation.
+     * Deletes multiple items from the cache based on the provided keys.
      *
-     * @param iterable $keys A list of string-based keys to be deleted.
-     *
-     * @return bool True if the items were successfully removed. False if there was an error.
-     *
-     * @throws \Psr\SimpleCache\InvalidArgumentException
-     *   MUST be thrown if $keys is neither an array nor a Traversable,
-     *   or if any of the $keys are not a legal value.
+     * @param array $keys An array of keys identifying the items to delete from the cache.
+     * @return bool Returns true after all specified keys have been processed for deletion.
      */
-    public function deleteMultiple($keys) {
+    public function deleteMultiple(iterable $keys): bool
+    {
         foreach ($keys as $key) {
             $this->delete ($key);
         }
@@ -192,7 +203,15 @@ class LocalMemoryCache extends CacheBase implements CacheInterface
     }
 
 
-    public function has($key) {
+    /**
+     * Checks if a given key exists in the local cache.
+     *
+     * @param string $key The key to check for existence in the local cache.
+     *
+     * @return bool True if the key exists in the local cache, false otherwise.
+     */
+    public function has(string $key): bool
+    {
         return array_key_exists($key, $this->arrLocalCache);
     }
 }
